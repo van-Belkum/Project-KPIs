@@ -1,6 +1,5 @@
 import os
 import io
-import hashlib
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -23,34 +22,6 @@ except Exception:
     STATSMODELS_OK = False
 
 st.set_page_config(page_title="KPI Project Report", layout="wide")
-
-# =============================
-# Password Gate (Streamlit Cloud)
-# =============================
-PASSWORD_HASH = st.secrets.get("app", {}).get("password_sha256", "")
-
-def check_password():
-    def _submit():
-        pwd = st.session_state.get("__pwd", "")
-        ok = hashlib.sha256(pwd.encode()).hexdigest() == PASSWORD_HASH if PASSWORD_HASH else False
-        st.session_state["__auth_ok"] = ok
-        st.session_state["__pwd"] = ""
-
-    if not PASSWORD_HASH:
-        st.warning("No password set. Add `app.password_sha256` to secrets to protect this app.")
-        return True
-
-    if st.session_state.get("__auth_ok"):
-        return True
-
-    with st.container():
-        st.title("🔒 Secure Access")
-        st.text_input("Enter password", type="password", key="__pwd", on_change=_submit)
-        st.info("Hint: Ask the admin for the password.")
-    st.stop()
-
-if not check_password():
-    st.stop()
 
 # =============================
 # Config / Column Mapping
@@ -82,7 +53,7 @@ def fetch_netsuite_tabular(url: str, headers: Optional[Dict[str, str]] = None) -
     for loader in (
         lambda b: pd.read_csv(io.BytesIO(b)),
         lambda b: pd.read_excel(io.BytesIO(b)),
-        lambda b: pd.read_csv(io.BytesIO(b), sep="\\t"),
+        lambda b: pd.read_csv(io.BytesIO(b), sep="\t"),
     ):
         try:
             return loader(data)
@@ -90,16 +61,19 @@ def fetch_netsuite_tabular(url: str, headers: Optional[Dict[str, str]] = None) -
             continue
     return pd.DataFrame()
 
+
 def coerce_dates(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
     for c in columns:
         if c in df.columns:
             df[c] = pd.to_datetime(df[c], errors="coerce")
     return df
 
+
 def week_floor(d: pd.Timestamp) -> pd.Timestamp:
     if pd.isna(d):
         return d
     return (d - pd.to_timedelta(d.weekday(), unit="D")).normalize()
+
 
 def latest_completion(sub: pd.DataFrame, completion_statuses: List[str]) -> Optional[pd.Timestamp]:
     if sub.empty:
@@ -112,6 +86,7 @@ def latest_completion(sub: pd.DataFrame, completion_statuses: List[str]) -> Opti
         return pd.NaT
     return done[DATE_COL].max()
 
+
 def next_forecast(sub: pd.DataFrame) -> Optional[pd.Timestamp]:
     if sub.empty or DATE_COL not in sub.columns:
         return pd.NaT
@@ -119,6 +94,7 @@ def next_forecast(sub: pd.DataFrame) -> Optional[pd.Timestamp]:
     if future.empty:
         return pd.NaT
     return future[DATE_COL].min()
+
 
 def weekly_targets_vs_actuals(df: pd.DataFrame, milestone: str, completion_statuses: List[str]) -> pd.DataFrame:
     s = df[df[MILESTONE_COL] == milestone].copy()
@@ -147,6 +123,7 @@ def weekly_targets_vs_actuals(df: pd.DataFrame, milestone: str, completion_statu
     out.insert(1, "Milestone", milestone)
     return out
 
+
 def forecast_weekly(series_df: pd.DataFrame, value_col: str = "Actual", periods: int = 8) -> pd.DataFrame:
     if series_df.empty:
         return pd.DataFrame(columns=["week", "Forecast", "yhat_lower", "yhat_upper"]) 
@@ -173,6 +150,7 @@ def forecast_weekly(series_df: pd.DataFrame, value_col: str = "Actual", periods:
     last = float(df["y"].iloc[-1])
     future_index = pd.date_range(pd.Timestamp.today().normalize(), periods=periods, freq="W-MON")
     return pd.DataFrame({"week": future_index, "Forecast": last})
+
 
 def progress_table(df: pd.DataFrame, milestones_order: List[str], completion_statuses: List[str]) -> pd.DataFrame:
     rows = []
@@ -209,12 +187,13 @@ def progress_table(df: pd.DataFrame, milestones_order: List[str], completion_sta
     cols += ["% Complete", "Current Stage", "Next Due", "Next Due Date"]
     return out[cols].sort_values(["% Complete", "Next Due Date"], ascending=[False, True])
 
+
 # =============================
 # Sidebar
 # =============================
 with st.sidebar:
     st.title("KPI Project Report")
-    st.caption("Live from NetSuite – secured with password.")
+    st.caption("Live from NetSuite – no Excel needed.")
 
     default_auth = st.secrets.get("auth", {}).get("header", "")
     milestones_url = st.text_input("Milestones URL", value=DEFAULT_MILESTONES_URL)
@@ -233,6 +212,7 @@ with st.sidebar:
     FORECAST_FLAG_COL = st.text_input("Is Forecast column", FORECAST_FLAG_COL)
     DESIGNER_COL = st.text_input("Designer column", DESIGNER_COL)
     DEPENDENCY_COL = st.text_input("Dependency column", DEPENDENCY_COL)
+
 
 # =============================
 # Data Load
@@ -319,18 +299,6 @@ else:
         st.subheader("Settings & Help")
         st.markdown(
             """
-**Security**  
-- This app is public but requires a password set in **secrets**: `app.password_sha256`.  
-- Generate a hash locally:  
-  ```python
-  import hashlib; print(hashlib.sha256(b"YOUR_PASSWORD").hexdigest())
-  ```
-- Store it in Streamlit Cloud → *App → Settings → Secrets*:
-  ```toml
-  [app]
-  password_sha256 = "<hash>"
-  ```
-
 **Auth header**  
 Set `auth.header = "Bearer <token>"` (or Cookie string) in Secrets for NetSuite endpoints. The sidebar reads it automatically.
 
